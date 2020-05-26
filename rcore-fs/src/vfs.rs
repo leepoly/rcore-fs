@@ -84,7 +84,7 @@ pub trait INode: Any + Sync + Send {
     }
 
     /// Control device
-    fn io_control(&self, _cmd: u32, _data: usize) -> Result<usize> {
+    fn io_control(&self, _cmd: u32, _data: usize) -> Result<()> {
         Err(FsError::NotSupported)
     }
 

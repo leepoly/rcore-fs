@@ -34,7 +34,7 @@ macro_rules! impl_inode {
         fn get_entry(&self, _id: usize) -> Result<String> {
             Err(FsError::NotDir)
         }
-        fn io_control(&self, _cmd: u32, _data: usize) -> Result<usize> {
+        fn io_control(&self, _cmd: u32, _data: usize) -> Result<()> {
             Err(FsError::NotSupported)
         }
         fn mmap(&self, _area: MMapArea) -> Result<()> {

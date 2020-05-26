@@ -2,6 +2,7 @@
 members = [
     "rcore-fs",
     "rcore-fs-sfs",
+    "rcore-fs-lfs",
     "rcore-fs-sefs",
     "rcore-fs-fuse",
     "rcore-fs-ext2",

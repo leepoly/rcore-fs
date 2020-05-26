@@ -6,6 +6,7 @@ use core::ops::{Deref, DerefMut};
 pub struct Dirty<T> {
     value: T,
     dirty: bool,
+    stale: bool,
 }
 
 impl<T> Dirty<T> {
@@ -13,7 +14,8 @@ impl<T> Dirty<T> {
     pub fn new(val: T) -> Dirty<T> {
         Dirty {
             value: val,
-            dirty: false,
+            dirty: false, // dirty: this block needs to be written back to disk
+            stale: false, // stale: this block is modified. We should allocate a new block for it.
         }
     }
 
@@ -22,6 +24,7 @@ impl<T> Dirty<T> {
         Dirty {
             value: val,
             dirty: true,
+            stale: false,
         }
     }
 
@@ -31,9 +34,18 @@ impl<T> Dirty<T> {
         self.dirty
     }
 
+    pub fn stale(&self) -> bool {
+        self.stale
+    }
+
+    pub fn turn_stale(&mut self) {
+        self.stale = true;
+    }
+
     /// Reset dirty
     pub fn sync(&mut self) {
         self.dirty = false;
+        self.stale = false;
     }
 }
 

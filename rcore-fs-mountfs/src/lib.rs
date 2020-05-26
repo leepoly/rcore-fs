@@ -291,7 +291,7 @@ impl INode for MNode {
         self.inode.get_entry(id)
     }
 
-    fn io_control(&self, cmd: u32, data: usize) -> Result<usize> {
+    fn io_control(&self, cmd: u32, data: usize) -> Result<()> {
         self.inode.io_control(cmd, data)
     }
 

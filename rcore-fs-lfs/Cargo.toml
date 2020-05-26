@@ -1,0 +1,15 @@
+[package]
+name = "rcore-fs-lfs"
+version = "0.1.0"
+authors = ["YiweiLi <liyw19@mails.tsinghua.edu.cn>"]
+edition = "2018"
+
+[dependencies]
+rcore-fs = { path = "../rcore-fs" }
+static_assertions = "0.3"
+spin = "0.5"
+log = "0.4"
+bitvec = { version = "0.17", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+tempfile = "3.0.7"

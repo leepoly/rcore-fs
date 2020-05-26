@@ -9,9 +9,8 @@ use rcore_fs::vfs::FileSystem;
 #[cfg(feature = "use_fuse")]
 use rcore_fs_fuse::fuse::VfsFuse;
 use rcore_fs_fuse::zip::{unzip_dir, zip_dir};
-use rcore_fs_ramfs as ramfs;
-use rcore_fs_sefs as sefs;
 use rcore_fs_sfs as sfs;
+use rcore_fs_lfs as lfs;
 
 use git_version::git_version;
 
@@ -54,6 +53,7 @@ enum Cmd {
 }
 
 fn main() {
+    println!("modified in aoslab, supporting lfs");
     env_logger::init().unwrap();
     let opt = Opt::from_args();
 
@@ -86,26 +86,34 @@ fn main() {
                 false => sfs::SimpleFileSystem::open(Arc::new(device)).expect("failed to open sfs"),
             }
         }
-        "sefs" => {
-            std::fs::create_dir_all(&opt.image).unwrap();
-            let device = sefs::dev::StdStorage::new(&opt.image);
+        "lfs" => {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(create)
+                .create(create)
+                .truncate(create)
+                .open(&opt.image)
+                .expect("failed to open image");
+            let device = Mutex::new(file);
+            const MAX_SPACE: usize = 0x8000 * 1024; // 8M
             match create {
-                true => sefs::SEFS::create(Box::new(device), &StdTimeProvider)
-                    .expect("failed to create sefs"),
-                false => sefs::SEFS::open(Box::new(device), &StdTimeProvider)
-                    .expect("failed to open sefs"),
+                true => lfs::LogFileSystem::create(Arc::new(device), MAX_SPACE)
+                    .expect("failed to create lfs"),
+                false => lfs::LogFileSystem::open(Arc::new(device)).expect("failed to open lfs"),
             }
         }
-        "ramfs" => ramfs::RamFS::new(),
         _ => panic!("unsupported file system"),
     };
+    println!("fuse create done");
     match opt.cmd {
         #[cfg(feature = "use_fuse")]
         Cmd::Mount => {
             fuse::mount(VfsFuse::new(fs), &opt.dir, &[]).expect("failed to mount fs");
         }
         Cmd::Zip => {
+            println!("fuse ready to zip");
             zip_dir(&opt.dir, fs.root_inode()).expect("failed to zip fs");
+            println!("fuse zip done");
         }
         Cmd::Unzip => {
             std::fs::create_dir(&opt.dir).expect("failed to create dir");
@@ -113,4 +121,5 @@ fn main() {
         }
         Cmd::GitVersion => unreachable!(),
     }
+    println!("fuse all done");
 }

@@ -14,6 +14,7 @@ const DEFAULT_MODE: u32 = 0o664;
 const BUF_SIZE: usize = 0x1000;
 
 pub fn zip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>> {
+    println!("into zip dir:{}", path.display());
     let dir = fs::read_dir(path)?;
     for entry in dir {
         let entry = entry?;
@@ -21,8 +22,9 @@ pub fn zip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>>
         let name = name_.to_str().unwrap();
         let type_ = entry.file_type()?;
         if type_.is_file() {
-            let inode = inode.create(name, FileType::File, DEFAULT_MODE)?;
             let mut file = fs::File::open(entry.path())?;
+            println!("processing file {} len: {}", name, file.metadata()?.len());
+            let inode = inode.create(name, FileType::File, DEFAULT_MODE)?;
             inode.resize(file.metadata()?.len() as usize)?;
             let mut buf: [u8; BUF_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
             let mut offset = 0usize;
@@ -32,7 +34,9 @@ pub fn zip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>>
                 inode.write_at(offset, &buf[..len])?;
                 offset += len;
             }
+            println!("processing {} done", name);
         } else if type_.is_dir() {
+            println!("processing dir {}", name);
             let inode = inode.create(name, FileType::Dir, DEFAULT_MODE)?;
             zip_dir(entry.path().as_path(), inode)?;
         } else if type_.is_symlink() {

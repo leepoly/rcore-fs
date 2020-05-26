@@ -305,7 +305,7 @@ impl INode for LockedINode {
         }
     }
 
-    fn io_control(&self, _cmd: u32, _data: usize) -> Result<usize> {
+    fn io_control(&self, _cmd: u32, _data: usize) -> Result<()> {
         Err(FsError::NotSupported)
     }
 
