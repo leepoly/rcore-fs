@@ -132,8 +132,10 @@ impl dyn INode {
         if self.metadata()?.type_ != FileType::Dir {
             return Err(FsError::NotDir);
         }
-
+        println!("start find .");
         let mut result = self.find(".")?;
+        println!("start find . one more time");
+        result = result.find(".")?;
         let mut rest_path = String::from(path);
         while rest_path != "" {
             if result.metadata()?.type_ != FileType::Dir {
@@ -159,6 +161,7 @@ impl dyn INode {
             if name == "" {
                 continue;
             }
+            println!("lookup: finding {}", name);
             let inode = result.find(&name)?;
             // Handle symlink
             if inode.metadata()?.type_ == FileType::SymLink && follow_times > 0 {

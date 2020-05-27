@@ -85,7 +85,7 @@ impl INodeImpl {
         match file_id {
             id if id >= disk_inode.blocks as BlockId => Err(FsError::InvalidParam),
             id if id < MAX_NBLOCK_DIRECT => {
-                println!("get disk id {} -> {}", id, disk_inode.direct[id]);
+                // println!("get disk id {} -> {}", id, disk_inode.direct[id]);
                 Ok(disk_inode.direct[id] as BlockId)
             }
             id if id < MAX_NBLOCK_INDIRECT => {
@@ -95,7 +95,7 @@ impl INodeImpl {
                     ENTRY_SIZE * (id - NDIRECT),
                     disk_block_id.as_buf_mut(),
                 )?;
-                println!("get disk id {} -> {}", id, disk_block_id);
+                // println!("get disk id {} -> {}", id, disk_block_id);
                 Ok(disk_block_id as BlockId)
             }
             _ => unimplemented!("double indirect blocks is not supported"),
@@ -106,7 +106,7 @@ impl INodeImpl {
         match file_id {
             id if id >= self.disk_inode.read().blocks as BlockId => Err(FsError::InvalidParam),
             id if id < MAX_NBLOCK_DIRECT => {
-                println!("set disk id {} -> {}", id, disk_block_id);
+                // println!("set disk id {} -> {}", id, disk_block_id);
                 self.disk_inode.write().direct[id] = disk_block_id as u32;
                 Ok(())
             }
@@ -117,7 +117,7 @@ impl INodeImpl {
                     ENTRY_SIZE * (id - NDIRECT),
                     disk_block_id.as_buf(),
                 )?;
-                println!("set disk id {} -> {}", id, disk_block_id);
+                // println!("set disk id {} -> {}", id, disk_block_id);
                 Ok(())
             }
             _ => unimplemented!("double indirect blocks is not supported"),
@@ -125,7 +125,13 @@ impl INodeImpl {
     }
     /// Only for Dir
     fn get_file_inode_and_entry_id(&self, name: &str) -> Option<(INodeId, usize)> {
-        (0..self.disk_inode.read().size as usize / DIRENT_SIZE)
+        let inode = self.disk_inode.read();
+        println!("D {}", self.id);
+        for i in 0..(inode.size as usize / DIRENT_SIZE) {
+            let dir_i = self.read_direntry(i as usize).unwrap();
+            println!("D i {} {:?}", i, dir_i.name);
+        }
+        (0..inode.size as usize / DIRENT_SIZE)
             .map(|i| (self.read_direntry(i as usize).unwrap(), i))
             .find(|(entry, _)| entry.name.as_ref() == name)
             .map(|(entry, id)| (entry.id as INodeId, id as usize))
@@ -169,6 +175,7 @@ impl INodeImpl {
         let dirent_count = size / DIRENT_SIZE;
         self._resize(size + DIRENT_SIZE)?;
         self.write_direntry(dirent_count, direntry)?;
+        println!("D write directory to {:?}", direntry.name);
         Ok(())
     }
     /// remove a direntry in middle of file and insert the last one here, useful for direntry remove
@@ -319,7 +326,7 @@ impl vfs::INode for INodeImpl {
     /// the size returned here is logical size(entry num for directory), not the disk space used.
     fn metadata(&self) -> vfs::Result<vfs::Metadata> {
         let disk_inode = self.disk_inode.read();
-        println!("name {} type {:?}", self.id, disk_inode.type_);
+        // println!("name {} type {:?}", self.id, disk_inode.type_);
         Ok(vfs::Metadata {
             dev: 0,
             inode: self.id,
@@ -435,12 +442,12 @@ impl vfs::INode for INodeImpl {
         Err(FsError::NotSupported)
     }
     fn find(&self, name: &str) -> vfs::Result<Arc<dyn vfs::INode>> {
-        println!("find name:{}", name);
         let info = self.metadata()?;
         if info.type_ != vfs::FileType::Dir {
             return Err(FsError::NotDir);
         }
         let inode_id = self.get_file_inode_id(name).ok_or(FsError::EntryNotFound)?;
+        println!("find name:{} myid:{} id:{}", name, self.id, inode_id);
         Ok(self.fs.get_inode(inode_id))
     }
     fn get_entry(&self, id: usize) -> vfs::Result<String> {
@@ -477,8 +484,8 @@ impl Drop for INodeImpl {
 
 pub struct Segment {
     /// on-disk segment
-    size: usize,
-    summary_block: RwLock<BTreeMap<INodeId, BlockId>>,
+    summary_block_num: usize,
+    summary_block_map: RwLock<BTreeMap<INodeId, BlockId>>,
     // imap: RwLock<BTreeMap<INodeId, INodeImpl>>,
 }
 
@@ -513,10 +520,10 @@ impl LogFileSystem {
     /// Load LFS from device
     pub fn open(device: Arc<dyn Device>) -> vfs::Result<Arc<Self>> {
         let super_block = device.load_struct::<SuperBlock>(BLKN_SUPER)?;
-        let mut check_region = device.load_struct::<CheckRegion>(BLKN_CR)?;
+        let check_region = device.load_struct::<CheckRegion>(BLKN_CR)?;
         let mut imaps = BTreeMap::new();
-        let mut imaps_blkid: u32 = check_region.imaps_blkid;
-        let mut inodes_num: u32 = check_region.inodes_num;
+        let imaps_blkid: u32 = check_region.imaps_blkid;
+        let inodes_num: u32 = check_region.inodes_num;
         // device.read_block(BLKN_CR, 0, imaps_blkid.as_buf_mut())?;
         // device.read_block(BLKN_CR, 4, inodes_num.as_buf_mut())?;
         println!("sb size: {} info {:?}", mem::size_of::<SuperBlock>(), super_block.info);
@@ -529,6 +536,18 @@ impl LogFileSystem {
                 imaps.insert(i, blk_id as usize);
             }
         }
+        let current_segment_id = super_block.current_seg_id as usize;
+        let mut seg_summaryblock_num: u32 = 0;
+        let mut segments = BTreeMap::new();
+        for i in 0..(current_segment_id+1) {
+            device.read_block(BLKN_SEGMENT+i, 0, seg_summaryblock_num.as_buf_mut())?;
+            let segment_i = Segment {
+                summary_block_num: seg_summaryblock_num as usize,
+                summary_block_map: RwLock::new(BTreeMap::new()),
+            };
+            segments.insert(i, segment_i);
+        }
+
         if !super_block.check() {
             return Err(FsError::WrongFs);
         }
@@ -548,22 +567,24 @@ impl LogFileSystem {
     /// Create a new LFS on blank disk
     pub fn create(device: Arc<dyn Device>, space: usize) -> vfs::Result<Arc<Self>> {
         let blocks = space / BLKSIZE;
-        let current_segment_id_: usize = 1;
+        let current_seg_id_: usize = 1; // segment 0 is reserved for superblock
         let current_segment = Segment {
-            size: SEGMENT_SIZE,
-            summary_block: RwLock::new(BTreeMap::new()),
+            summary_block_num: 0,
+            summary_block_map: RwLock::new(BTreeMap::new()),
         };
         let n_segment = space / SEGMENT_SIZE;
-        let unused_blocks_ = ((n_segment - current_segment_id_) + current_segment.size) * SEGMENT_SIZE / BLKSIZE;
+        let current_seg_size: usize = 0;
+        let unused_blocks_ = ((n_segment - current_seg_id_) + current_seg_size) * SEGMENT_SIZE / BLKSIZE;
         assert!(blocks >= 16, "space too small");
         let super_block = SuperBlock {
             magic: MAGIC,
             blocks: blocks as u32,
             unused_blocks: unused_blocks_ as u32,
             info: Str32::from(DEFAULT_INFO),
-            current_segment_id: current_segment_id_ as u32,
+            current_seg_id: current_seg_id_ as u32,
+            current_seg_size: current_seg_size as u32,
             next_ino_number: INO_ROOT as u32,
-            n_segment_capacity: n_segment as u32,
+            n_seg_capacity: n_segment as u32,
         };
 
         let check_region = CheckRegion {
@@ -589,13 +610,12 @@ impl LogFileSystem {
         println!("init root inode...");
         // Init root INode
         let root_blkid = lfs.alloc_block().ok_or(FsError::NoDeviceSpace)?;
-        println!("init root segment size:{}", lfs.segments.read().get(&(lfs.super_block.read().current_segment_id as usize)).unwrap().size);
+        // println!("init current_segment_size:{}", lfs.super_block.read().current_seg_size);
         let root_inode = lfs._new_inode(root_blkid, Dirty::new_dirty(DiskINode::new_dir()));
         root_inode.init_direntry(root_blkid)?;
         root_inode.nlinks_inc(); //for .
         root_inode.nlinks_inc(); //for ..(root's parent is itself)
         println!("syncing root inode...");
-        // root_inode.disk_inode.write().sync(); // remove dirty flag to avoid one more writeback
         root_inode.sync_all()?;
         println!("create lfs done");
         println!("rootnode type {:?}", root_inode.disk_inode.read().type_);
@@ -617,35 +637,33 @@ impl LogFileSystem {
 
     fn alloc_segment(&self, seg_id: usize) {
         assert!(!self.segments.read().contains_key(&seg_id));
-        assert!(seg_id < self.super_block.read().n_segment_capacity as usize);
+        assert!(seg_id < self.super_block.read().n_seg_capacity as usize);
         let segment = Segment {
-            size: 0,
-            summary_block: RwLock::new(BTreeMap::new()),
+            summary_block_num: 0,
+            summary_block_map: RwLock::new(BTreeMap::new()),
         };
+        self.super_block.write().current_seg_size = 0;
         self.segments.write().insert(seg_id, segment);
     }
 
     /// Allocate a block, return block id
     fn alloc_block(&self) -> Option<usize> {
-        let current_segment_id = self.super_block.read().current_segment_id as usize;
-        let mut segments_ptr = self.segments.write();
+        let current_seg_id = self.super_block.read().current_seg_id as usize;
         let mut sb = self.super_block.write();
-        let mut segment = segments_ptr.get_mut(&current_segment_id).unwrap();
         sb.unused_blocks -= 1;
-        let new_blk_id = (segment.size  + current_segment_id * SEGMENT_SIZE) / BLKSIZE;
-        if segment.size >= SEGMENT_SIZE - BLKSIZE {
+        let mut current_seg_size = sb.current_seg_size as usize;
+        let new_blk_id = (current_seg_size  + current_seg_id * SEGMENT_SIZE) / BLKSIZE;
+        if current_seg_size > SEGMENT_SIZE - BLKSIZE {
             return None;
         } else {
-            segment.size += BLKSIZE;
-            if segment.size == SEGMENT_SIZE - BLKSIZE {
-                let new_seg_id = current_segment_id + 1;
-                sb.current_segment_id = new_seg_id as u32;
-                drop(segments_ptr);
+            current_seg_size += BLKSIZE;
+            sb.current_seg_size = current_seg_size as u32;
+            if current_seg_size == SEGMENT_SIZE {
+                let new_seg_id = current_seg_id + 1;
+                sb.current_seg_id = new_seg_id as u32;
                 drop(sb);
                 self.alloc_segment(new_seg_id as usize);
-                let segments_ptr = self.segments.read();
-                println!("allocate blkid: {} at segment: {} seg_size: {}", new_blk_id, current_segment_id, segments_ptr.get(&current_segment_id).unwrap().size);
-                drop(segments_ptr);
+                println!("allocate blkid: {} at segment: {} seg_size: {}", new_blk_id, current_seg_id, current_seg_size);
             }
         }
         Some(new_blk_id)
@@ -672,6 +690,8 @@ impl LogFileSystem {
         });
         cr.inodes_num += 1;
         self.imaps.write().insert(ino_id, blk_id);
+        self.inodes.write().insert(ino_id, Arc::downgrade(&inode));
+        println!("add inode {} -> {}", ino_id, blk_id);
         inode
     }
 
@@ -685,6 +705,7 @@ impl LogFileSystem {
             fs: self.self_ptr.upgrade().unwrap(),
             device_inode_id: device_inode_id,
         });
+        self.inodes.write().insert(ino_id, Arc::downgrade(&inode));
         inode
     }
 
@@ -698,7 +719,7 @@ impl LogFileSystem {
         let blk_ptr = imaps_ptr.get(&id).unwrap();
         println!("get_inode: blkid={}", blk_ptr);
         // In the BTreeSet and not weak.
-        if let Some(inode) = self.inodes.read().get(blk_ptr) {
+        if let Some(inode) = self.inodes.read().get(&id) {
             if let Some(inode) = inode.upgrade() {
                 return inode;
             }
@@ -758,14 +779,18 @@ impl vfs::FileSystem for LogFileSystem {
             for (key_ptr, value_ptr) in imaps.iter() {
                 let key = *key_ptr;
                 let value = *value_ptr;
-                println!("write offset {} value {}", (cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, value);
-                self.device.write_at((cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, (value as u32).as_buf());
+                // println!("write offset {} value {}", (cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, value);
+                self.device.write_at((cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, (value as u32).as_buf())?;
             }
             cr.inodes_num = imaps.len() as u32;
-            println!("writeback imaps offset {} len:{}", BLKN_CR * BLKSIZE, cr.inodes_num);
-            self.device.write_at(BLKN_CR * BLKSIZE, cr.as_buf());
+            // println!("writeback imaps offset {} len:{}", BLKN_CR * BLKSIZE, cr.inodes_num);
+            self.device.write_at(BLKN_CR * BLKSIZE, cr.as_buf())?;
             cr.sync();
             imaps.sync();
+        }
+        for (seg_id, segment) in self.segments.read().iter() {
+            let seg_summaryblock_num = segment.summary_block_num as u32;
+            self.device.write_at((BLKN_SEGMENT+seg_id) * BLKSIZE, seg_summaryblock_num.as_buf())?;
         }
 
         self.flush_weak_inodes();

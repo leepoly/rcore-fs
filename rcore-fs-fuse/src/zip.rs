@@ -50,12 +50,40 @@ pub fn zip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>>
             inode.write_at(0, data)?;
         }
     }
+    let files = inode.list()?;
+    for name in files.iter() {
+        println!("file {}", name);
+    }
+    let name_i = "write";
+    println!("start lookup!");
+    println!();
+    let inode = inode.lookup(name_i)?;
+    println!("size {}", inode.metadata()?.size);
     Ok(())
+}
+
+/// 为 [`INode`] 类型添加的扩展功能
+pub trait INodeExt {
+    /// 打印当前目录的文件
+    fn ls(&self);
+
+}
+
+impl INodeExt for dyn INode {
+    fn ls(&self) {
+        let mut id = 0;
+        while let Ok(name) = self.get_entry(id) {
+            println!("{}", name);
+            id += 1;
+        }
+    }
+
 }
 
 pub fn unzip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>> {
     println!("into unzip dir:{}", path.display());
     let files = inode.list()?;
+    inode.ls();
     for name in files.iter().skip(2) {
         println!("processing file {}", name);
         let inode = inode.lookup(name.as_str())?;
