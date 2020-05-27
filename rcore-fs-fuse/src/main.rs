@@ -104,7 +104,6 @@ fn main() {
         }
         _ => panic!("unsupported file system"),
     };
-    println!("fuse create done");
     match opt.cmd {
         #[cfg(feature = "use_fuse")]
         Cmd::Mount => {

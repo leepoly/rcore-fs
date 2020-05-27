@@ -54,8 +54,10 @@ pub fn zip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>>
 }
 
 pub fn unzip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>> {
+    println!("into unzip dir:{}", path.display());
     let files = inode.list()?;
     for name in files.iter().skip(2) {
+        println!("processing file {}", name);
         let inode = inode.lookup(name.as_str())?;
         let mut path = path.to_path_buf();
         path.push(name);
