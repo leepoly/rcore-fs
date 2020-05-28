@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str;
 use std::sync::Arc;
 
-use rcore_fs::vfs::{FileType, INode};
+use rcore_fs::vfs::{FileSystem, FileType, INode};
 
 const DEFAULT_MODE: u32 = 0o664;
 const BUF_SIZE: usize = 0x1000;
@@ -23,7 +23,7 @@ pub fn zip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>>
         let type_ = entry.file_type()?;
         if type_.is_file() {
             let mut file = fs::File::open(entry.path())?;
-            println!("processing file {} len: {}", name, file.metadata()?.len());
+            println!("processing file {:?} len: {}", entry.path(), file.metadata()?.len());
             let inode = inode.create(name, FileType::File, DEFAULT_MODE)?;
             inode.resize(file.metadata()?.len() as usize)?;
             let mut buf: [u8; BUF_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
@@ -50,14 +50,34 @@ pub fn zip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>>
             inode.write_at(0, data)?;
         }
     }
-    let files = inode.list()?;
-    for name in files.iter() {
-        println!("file {}", name);
-    }
-    let name_i = "write";
-    println!("start lookup!");
+
+    Ok(())
+}
+
+pub fn zip_dir2(path: &Path, inode: Arc<dyn INode>, depth: usize) -> Result<(), Box<dyn Error>> {
+    println!("fuse: finish creating img");
+    inode.ls();
+    // let files = inode.list()?;
+    // for name in files.iter() {
+    //     println!("file {}", name);
+    // }
+    let name_i = "hello_world";
     println!();
+    println!("start lookup!");
     let inode = inode.lookup(name_i)?;
+
+    println!("size {}", inode.metadata()?.size);
+    println!("modify hello_world...");
+    let mut file = fs::File::open("build/disk/test/temp111")?;
+    let mut buf: [u8; BUF_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
+    let mut offset = 0usize;
+    let mut len = BUF_SIZE;
+    while len == BUF_SIZE {
+        len = file.read(&mut buf)?;
+        inode.write_at(offset, &buf[..len])?;
+        offset += len;
+    }
+
     println!("size {}", inode.metadata()?.size);
     Ok(())
 }

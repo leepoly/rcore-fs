@@ -134,8 +134,6 @@ impl dyn INode {
         }
         println!("start find .");
         let mut result = self.find(".")?;
-        println!("start find . one more time");
-        result = result.find(".")?;
         let mut rest_path = String::from(path);
         while rest_path != "" {
             if result.metadata()?.type_ != FileType::Dir {

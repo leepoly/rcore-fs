@@ -42,6 +42,14 @@ impl<T> Dirty<T> {
         self.stale = true;
     }
 
+    pub fn turn_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    pub fn clear_stale(&mut self) {
+        self.stale = false;
+    }
+
     /// Reset dirty
     pub fn sync(&mut self) {
         self.dirty = false;

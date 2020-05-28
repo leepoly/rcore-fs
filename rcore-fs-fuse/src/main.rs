@@ -8,7 +8,7 @@ use rcore_fs::dev::std_impl::StdTimeProvider;
 use rcore_fs::vfs::FileSystem;
 #[cfg(feature = "use_fuse")]
 use rcore_fs_fuse::fuse::VfsFuse;
-use rcore_fs_fuse::zip::{unzip_dir, zip_dir};
+use rcore_fs_fuse::zip::{unzip_dir, zip_dir, zip_dir2};
 use rcore_fs_sfs as sfs;
 use rcore_fs_lfs as lfs;
 
@@ -112,6 +112,7 @@ fn main() {
         Cmd::Zip => {
             println!("fuse ready to zip");
             zip_dir(&opt.dir, fs.root_inode()).expect("failed to zip fs");
+            zip_dir2(&opt.dir, fs.root_inode(), 0).expect("failed to zip fs");
             println!("fuse zip done");
         }
         Cmd::Unzip => {

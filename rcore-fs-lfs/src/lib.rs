@@ -126,10 +126,10 @@ impl INodeImpl {
     /// Only for Dir
     fn get_file_inode_and_entry_id(&self, name: &str) -> Option<(INodeId, usize)> {
         let inode = self.disk_inode.read();
-        println!("D {}", self.id);
+        // println!("D {}", self.id);
         for i in 0..(inode.size as usize / DIRENT_SIZE) {
             let dir_i = self.read_direntry(i as usize).unwrap();
-            println!("D i {} {:?}", i, dir_i.name);
+            // println!("D i {} {:?}", i, dir_i.name);
         }
         (0..inode.size as usize / DIRENT_SIZE)
             .map(|i| (self.read_direntry(i as usize).unwrap(), i))
@@ -198,15 +198,16 @@ impl INodeImpl {
             return Err(FsError::InvalidParam);
         }
         use core::cmp::Ordering;
-        let old_blocks = self.disk_inode.read().blocks;
+        let mut disk_inode = self.disk_inode.write();
+        let old_blocks = disk_inode.blocks;
+        println!("_resize: id {} dirty {} stale {}", self.id, disk_inode.dirty(), disk_inode.stale());
         match blocks.cmp(&old_blocks) {
             Ordering::Equal => {
-                self.disk_inode.write().size = len as u32;
+                disk_inode.size = len as u32;
             }
             Ordering::Greater => {
-                let mut disk_inode = self.disk_inode.write();
                 disk_inode.blocks = blocks;
-                println!("disk inode old_blocks {} blocks {}", old_blocks, blocks);
+                // println!("disk inode old_blocks {} blocks {}", old_blocks, blocks);
                 if blocks >= MAX_NBLOCK_INDIRECT as u32 {
                     unimplemented!("not support double indirect");
                 }
@@ -220,7 +221,7 @@ impl INodeImpl {
                     // println!("in_resize disk inode blocks i {} {}", i, disk_block_id);
                     self.set_disk_block_id(i as usize, disk_block_id)?;
                 }
-                println!("set_disk_block_id finish");
+                // println!("set_disk_block_id finish");
                 // clean up
                 let mut disk_inode = self.disk_inode.write();
                 disk_inode.size = len as u32;
@@ -231,12 +232,12 @@ impl INodeImpl {
                 // Not support space reduction!
             }
         }
-        println!("resize finish");
+        // println!("resize finish");
         Ok(())
     }
     // Note: the _\w*_at method always return begin>size?0:begin<end?0:(min(size,end)-begin) when success
     /// Read/Write content, no matter what type it is
-    fn _io_at<F>(&self, begin: usize, end: usize, mut f: F) -> vfs::Result<usize>
+    fn _io_at<F>(&self, begin: usize, end: usize, mut f: F, iswrite: bool) -> vfs::Result<usize>
     where
         F: FnMut(&Arc<dyn Device>, &BlockRange, usize) -> vfs::Result<()>,
     {
@@ -247,7 +248,34 @@ impl INodeImpl {
             block_size_log2: BLKSIZE_LOG2,
         };
 
-        // For each block
+        if iswrite && self.disk_inode.read().dirty() && (self.disk_inode.read().stale()) {
+            // back up stale data
+            let mut buf: [u8; BLKSIZE] = unsafe { MaybeUninit::uninit().assume_init() };
+            let begin_offset_align = begin/BLKSIZE * BLKSIZE;
+            let begin_entryid = begin/BLKSIZE;
+            let end_entryid = (end + BLKSIZE - 1) / BLKSIZE;
+            println!("DDD offbegin {}, offbegin_align {}, offend {}, dirty {}, stale {}", begin, begin_offset_align, end, self.disk_inode.read().dirty(), self.disk_inode.read().stale());
+            let old_begin_blkid = self.get_disk_block_id(begin_entryid)?;
+
+            &self.fs.device.read_block(
+                old_begin_blkid,
+                0,
+                &mut buf[0..begin - begin_offset_align],
+            );
+
+            for i in begin_entryid..end_entryid {
+                let disk_block_id = self.fs.alloc_block().expect("no space");
+                self.set_disk_block_id(i as usize, disk_block_id)?;
+            }
+
+            let new_begin_blkid = self.get_disk_block_id(begin_entryid)?;
+            &self.fs.device.write_block(
+                new_begin_blkid,
+                0,
+                &mut buf[0..begin - begin_offset_align],
+            );
+        }
+
         let mut buf_offset = 0usize;
         for mut range in iter {
             range.block = self.get_disk_block_id(range.block)?;
@@ -264,13 +292,16 @@ impl INodeImpl {
                 range.begin,
                 &mut buf[offset..offset + range.len()],
             )
-        })
+        }, false)
     }
     /// Write content, no matter what type it is
     fn _write_at(&self, offset: usize, buf: &[u8]) -> vfs::Result<usize> {
-        self._io_at(offset, offset + buf.len(), |device, range, offset| {
+        self.disk_inode.write().turn_dirty();
+        let res = self._io_at(offset, offset + buf.len(), |device, range, offset| {
             device.write_block(range.block, range.begin, &buf[offset..offset + range.len()])
-        })
+        }, true);
+        self.disk_inode.write().clear_stale();
+        res
     }
     fn nlinks_inc(&self) {
         self.disk_inode.write().nlinks += 1;
@@ -356,7 +387,7 @@ impl vfs::INode for INodeImpl {
     }
     fn sync_all(&self) -> vfs::Result<()> {
         let mut disk_inode = self.disk_inode.write();
-        // println!("dirty {}", disk_inode.dirty());
+        println!("sync_all: id {} dirty {} stale {}", self.id, disk_inode.dirty(), disk_inode.stale());
         if disk_inode.dirty() {
             // allocate a new block and append write to it
             let new_blk_id = if disk_inode.stale() {
@@ -364,7 +395,6 @@ impl vfs::INode for INodeImpl {
             } else {
                 self.blk_id
             };
-            // let new_blk_id = self.fs.alloc_block().unwrap();
             // update imaps
             let mut imaps = self.fs.imaps.write();
             if let Some(x) = imaps.get_mut(&self.id) {
@@ -712,7 +742,7 @@ impl LogFileSystem {
     /// Get inode by id. Load if not in memory.
     /// ** Must ensure it's a valid INode **
     fn get_inode(&self, id: INodeId) -> Arc<INodeImpl> {
-        // println!("in get_inode contains {}", self.imaps.read().contains_key(&id));
+        // println!("in get_inode contains {}", self.imaps.read().contains_key(&id))
         assert!(self.imaps.read().contains_key(&id));
         let imaps_ptr = self.imaps.read();
         println!("get_inode: id={}", id);
@@ -726,7 +756,9 @@ impl LogFileSystem {
         }
         let blk = *blk_ptr;
         // Load if not in set, or is weak ref.
-        let disk_inode = Dirty::new(self.device.load_struct::<DiskINode>(blk).unwrap());
+        let mut disk_inode = Dirty::new(self.device.load_struct::<DiskINode>(blk).unwrap());
+        println!("TTT id {} turn_stale", id);
+        disk_inode.turn_stale();
         self._map_inode(id, blk, disk_inode)
     }
     /// Create a new INode file
