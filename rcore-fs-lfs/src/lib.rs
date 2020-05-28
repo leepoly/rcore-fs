@@ -31,6 +31,7 @@ mod structs;
 
 trait DeviceExt: Device {
     fn read_block(&self, id: BlockId, offset: usize, buf: &mut [u8]) -> vfs::Result<()> {
+        // println!("read block offset {} len {}", id * BLKSIZE + offset, buf.len());
         debug_assert!(offset + buf.len() <= BLKSIZE);
         match self.read_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
@@ -39,6 +40,7 @@ trait DeviceExt: Device {
     }
     fn write_block(&self, id: BlockId, offset: usize, buf: &[u8]) -> vfs::Result<()> {
         debug_assert!(offset + buf.len() <= BLKSIZE);
+        println!("write block offset {} len {}", id * BLKSIZE + offset, buf.len());
         match self.write_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
             _ => panic!("cannot write block {} offset {} to device", id, offset),
@@ -106,7 +108,7 @@ impl INodeImpl {
         match file_id {
             id if id >= self.disk_inode.read().blocks as BlockId => Err(FsError::InvalidParam),
             id if id < MAX_NBLOCK_DIRECT => {
-                // println!("set disk id {} -> {}", id, disk_block_id);
+                println!("set disk id {} -> {}", id, disk_block_id);
                 self.disk_inode.write().direct[id] = disk_block_id as u32;
                 Ok(())
             }
@@ -254,7 +256,8 @@ impl INodeImpl {
             let begin_offset_align = begin/BLKSIZE * BLKSIZE;
             let begin_entryid = begin/BLKSIZE;
             let end_entryid = (end + BLKSIZE - 1) / BLKSIZE;
-            println!("DDD offbegin {}, offbegin_align {}, offend {}, dirty {}, stale {}", begin, begin_offset_align, end, self.disk_inode.read().dirty(), self.disk_inode.read().stale());
+            let end_offset_align = end_entryid * BLKSIZE;
+            println!("DDD offbegin {}, offbegin_align {}, offend {}, offend_align {}, dirty {}, stale {}", begin, begin_offset_align, end, end_offset_align, self.disk_inode.read().dirty(), self.disk_inode.read().stale());
             let old_begin_blkid = self.get_disk_block_id(begin_entryid)?;
 
             &self.fs.device.read_block(
@@ -268,17 +271,33 @@ impl INodeImpl {
                 self.set_disk_block_id(i as usize, disk_block_id)?;
             }
 
-            let new_begin_blkid = self.get_disk_block_id(begin_entryid)?;
-            &self.fs.device.write_block(
-                new_begin_blkid,
-                0,
-                &mut buf[0..begin - begin_offset_align],
-            );
+            if begin_offset_align < begin {
+                let new_begin_blkid = self.get_disk_block_id(begin_entryid)?;
+                println!("write to blk {} offset {}", new_begin_blkid, 0);
+                &self.fs.device.write_block(
+                    new_begin_blkid,
+                    0,
+                    &mut buf[0..begin - begin_offset_align],
+                );
+            }
+
+            if end < end_offset_align {
+                let new_end_blkid = self.get_disk_block_id(end_entryid - 1)?;
+                println!("write to blk {} offset {}", new_end_blkid, 0);
+                &self.fs.device.write_block(
+                    new_end_blkid,
+                    end,
+                    &mut buf[end..end_offset_align],
+                );
+            }
         }
 
         let mut buf_offset = 0usize;
         for mut range in iter {
             range.block = self.get_disk_block_id(range.block)?;
+            if iswrite {
+                // println!("write to blk {} offset {}", range.block, range.begin);
+            }
             f(&self.fs.device, &range, buf_offset)?;
             buf_offset += range.len();
         }
@@ -336,6 +355,7 @@ impl vfs::INode for INodeImpl {
             FileType::File | FileType::SymLink => {
                 let end_offset = offset + buf.len();
                 if (size as usize) < end_offset {
+                    println!("Need resize for alignment");
                     self._resize(end_offset)?;
                 }
                 self._write_at(offset, buf)
