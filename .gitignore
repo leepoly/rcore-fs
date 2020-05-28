@@ -1,6 +1,8 @@
 /target
 **/*.rs.bk
 Cargo.lock
+rcore-fs-lfs/.vscode/*
+rcore-fs-lfs/src/trace/*.txt
 .idea
 /*.img
 *.swp

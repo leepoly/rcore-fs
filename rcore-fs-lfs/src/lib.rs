@@ -33,6 +33,7 @@ trait DeviceExt: Device {
     fn read_block(&self, id: BlockId, offset: usize, buf: &mut [u8]) -> vfs::Result<()> {
         // println!("read block offset {} len {}", id * BLKSIZE + offset, buf.len());
         debug_assert!(offset + buf.len() <= BLKSIZE);
+        println!("offset\t{}\tlen\t{}\t0", id * BLKSIZE + offset, buf.len());
         match self.read_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
             _ => panic!("cannot read block {} offset {} from device", id, offset),
@@ -40,7 +41,7 @@ trait DeviceExt: Device {
     }
     fn write_block(&self, id: BlockId, offset: usize, buf: &[u8]) -> vfs::Result<()> {
         debug_assert!(offset + buf.len() <= BLKSIZE);
-        println!("write block offset {} len {}", id * BLKSIZE + offset, buf.len());
+        println!("offset\t{}\tlen\t{}\t1", id * BLKSIZE + offset, buf.len());
         match self.write_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
             _ => panic!("cannot write block {} offset {} to device", id, offset),
@@ -257,7 +258,7 @@ impl INodeImpl {
             let begin_entryid = begin/BLKSIZE;
             let end_entryid = (end + BLKSIZE - 1) / BLKSIZE;
             let end_offset_align = end_entryid * BLKSIZE;
-            println!("DDD offbegin {}, offbegin_align {}, offend {}, offend_align {}, dirty {}, stale {}", begin, begin_offset_align, end, end_offset_align, self.disk_inode.read().dirty(), self.disk_inode.read().stale());
+            // println!("DDD offbegin {}, offbegin_align {}, offend {}, offend_align {}, dirty {}, stale {}", begin, begin_offset_align, end, end_offset_align, self.disk_inode.read().dirty(), self.disk_inode.read().stale());
             let old_begin_blkid = self.get_disk_block_id(begin_entryid)?;
 
             &self.fs.device.read_block(
@@ -273,7 +274,6 @@ impl INodeImpl {
 
             if begin_offset_align < begin {
                 let new_begin_blkid = self.get_disk_block_id(begin_entryid)?;
-                println!("write to blk {} offset {}", new_begin_blkid, 0);
                 &self.fs.device.write_block(
                     new_begin_blkid,
                     0,
@@ -283,7 +283,6 @@ impl INodeImpl {
 
             if end < end_offset_align {
                 let new_end_blkid = self.get_disk_block_id(end_entryid - 1)?;
-                println!("write to blk {} offset {}", new_end_blkid, 0);
                 &self.fs.device.write_block(
                     new_end_blkid,
                     end,
@@ -319,7 +318,7 @@ impl INodeImpl {
         let res = self._io_at(offset, offset + buf.len(), |device, range, offset| {
             device.write_block(range.block, range.begin, &buf[offset..offset + range.len()])
         }, true);
-        self.disk_inode.write().clear_stale();
+        self.disk_inode.write().clear_stale(); // aoslab DEBUG: comment it to allow in-place metadata writing or not.
         res
     }
     fn nlinks_inc(&self) {
@@ -777,7 +776,7 @@ impl LogFileSystem {
         let blk = *blk_ptr;
         // Load if not in set, or is weak ref.
         let mut disk_inode = Dirty::new(self.device.load_struct::<DiskINode>(blk).unwrap());
-        println!("TTT id {} turn_stale", id);
+        // println!("TTT id {} turn_stale", id);
         disk_inode.turn_stale();
         self._map_inode(id, blk, disk_inode)
     }

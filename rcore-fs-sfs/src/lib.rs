@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(test, feature = "std")), no_std)]
+// #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
 extern crate alloc;
 #[macro_use]
@@ -32,6 +32,7 @@ mod tests;
 trait DeviceExt: Device {
     fn read_block(&self, id: BlockId, offset: usize, buf: &mut [u8]) -> vfs::Result<()> {
         debug_assert!(offset + buf.len() <= BLKSIZE);
+        println!("offset\t{}\tlen\t{}\t0", id * BLKSIZE + offset, buf.len());
         match self.read_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
             _ => panic!("cannot read block {} offset {} from device", id, offset),
@@ -39,6 +40,7 @@ trait DeviceExt: Device {
     }
     fn write_block(&self, id: BlockId, offset: usize, buf: &[u8]) -> vfs::Result<()> {
         debug_assert!(offset + buf.len() <= BLKSIZE);
+        println!("offset\t{}\tlen\t{}\t1", id * BLKSIZE + offset, buf.len());
         match self.write_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
             _ => panic!("cannot write block {} offset {} to device", id, offset),

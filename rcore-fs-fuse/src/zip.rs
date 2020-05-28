@@ -68,7 +68,7 @@ pub fn zip_dir2(path: &Path, inode: Arc<dyn INode>, depth: usize) -> Result<(), 
 
     println!("size {}", inode.metadata()?.size);
     println!("modify hello_world...");
-    let mut file = fs::File::open("build/disk/test/temp111")?;
+    let mut file = fs::File::open("build/disk/test/temp123")?;
     let mut buf: [u8; BUF_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
     let mut offset = 0usize;
     let mut len = BUF_SIZE;
