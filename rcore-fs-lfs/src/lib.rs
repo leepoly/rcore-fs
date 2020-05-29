@@ -533,16 +533,10 @@ impl Drop for INodeImpl {
 
 pub struct Segment {
     /// on-disk segment
-    summary_block_num: usize,
+    size: usize,
     summary_block_map: RwLock<BTreeMap<INodeId, BlockId>>,
     // imap: RwLock<BTreeMap<INodeId, INodeImpl>>,
 }
-
-// impl Segment {
-//     pub fn increase_size(&mut self, size: usize) {
-//         self.size += size;
-//     }
-// }
 
 /// filesystem for lfs
 ///
@@ -586,12 +580,12 @@ impl LogFileSystem {
             }
         }
         let current_segment_id = super_block.current_seg_id as usize;
-        let mut seg_summaryblock_num: u32 = 0;
+        let mut seg_size: u32 = 0;
         let mut segments = BTreeMap::new();
         for i in 0..(current_segment_id+1) {
-            device.read_block(BLKN_SEGMENT+i, 0, seg_summaryblock_num.as_buf_mut())?;
+            device.read_block(BLKN_SEGMENT+i, 0, seg_size.as_buf_mut())?;
             let segment_i = Segment {
-                summary_block_num: seg_summaryblock_num as usize,
+                size: seg_size as usize,
                 summary_block_map: RwLock::new(BTreeMap::new()),
             };
             segments.insert(i, segment_i);
@@ -618,12 +612,11 @@ impl LogFileSystem {
         let blocks = space / BLKSIZE;
         let current_seg_id_: usize = 1; // segment 0 is reserved for superblock
         let current_segment = Segment {
-            summary_block_num: 0,
+            size: 0,
             summary_block_map: RwLock::new(BTreeMap::new()),
         };
         let n_segment = space / SEGMENT_SIZE;
-        let current_seg_size: usize = 0;
-        let unused_blocks_ = ((n_segment - current_seg_id_) + current_seg_size) * SEGMENT_SIZE / BLKSIZE;
+        let unused_blocks_ = ((n_segment - current_seg_id_) + SEGMENT_SIZE) * SEGMENT_SIZE / BLKSIZE;
         assert!(blocks >= 16, "space too small");
         let super_block = SuperBlock {
             magic: MAGIC,
@@ -631,9 +624,8 @@ impl LogFileSystem {
             unused_blocks: unused_blocks_ as u32,
             info: Str32::from(DEFAULT_INFO),
             current_seg_id: current_seg_id_ as u32,
-            current_seg_size: current_seg_size as u32,
             next_ino_number: INO_ROOT as u32,
-            n_seg_capacity: n_segment as u32,
+            n_segment: n_segment as u32,
         };
 
         let check_region = CheckRegion {
@@ -686,12 +678,11 @@ impl LogFileSystem {
 
     fn alloc_segment(&self, seg_id: usize) {
         assert!(!self.segments.read().contains_key(&seg_id));
-        assert!(seg_id < self.super_block.read().n_seg_capacity as usize);
+        assert!(seg_id < self.super_block.read().n_segment as usize);
         let segment = Segment {
-            summary_block_num: 0,
+            size: 0,
             summary_block_map: RwLock::new(BTreeMap::new()),
         };
-        self.super_block.write().current_seg_size = 0;
         self.segments.write().insert(seg_id, segment);
     }
 
@@ -700,13 +691,14 @@ impl LogFileSystem {
         let current_seg_id = self.super_block.read().current_seg_id as usize;
         let mut sb = self.super_block.write();
         sb.unused_blocks -= 1;
-        let mut current_seg_size = sb.current_seg_size as usize;
-        let new_blk_id = (current_seg_size  + current_seg_id * SEGMENT_SIZE) / BLKSIZE;
+        let cur_seg_id = sb.current_seg_id as usize;
+        let mut current_seg_size = self.segments.read().get(&cur_seg_id).unwrap().size;
+        let new_blk_id = (current_seg_size + current_seg_id * SEGMENT_SIZE) / BLKSIZE;
         if current_seg_size > SEGMENT_SIZE - BLKSIZE {
             return None;
         } else {
             current_seg_size += BLKSIZE;
-            sb.current_seg_size = current_seg_size as u32;
+            self.segments.write().get_mut(&cur_seg_id).unwrap().size = current_seg_size;
             if current_seg_size == SEGMENT_SIZE {
                 let new_seg_id = current_seg_id + 1;
                 sb.current_seg_id = new_seg_id as u32;
@@ -840,8 +832,8 @@ impl vfs::FileSystem for LogFileSystem {
             imaps.sync();
         }
         for (seg_id, segment) in self.segments.read().iter() {
-            let seg_summaryblock_num = segment.summary_block_num as u32;
-            self.device.write_at((BLKN_SEGMENT+seg_id) * BLKSIZE, seg_summaryblock_num.as_buf())?;
+            let seg_size = segment.size as u32;
+            self.device.write_at((BLKN_SEGMENT+seg_id) * BLKSIZE, seg_size.as_buf())?;
         }
 
         self.flush_weak_inodes();

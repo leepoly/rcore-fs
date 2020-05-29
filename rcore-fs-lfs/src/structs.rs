@@ -24,9 +24,8 @@ pub struct SuperBlock {
     /// information for sfs
     pub info: Str32,
     pub current_seg_id: u32,
-    pub current_seg_size: u32,
     pub next_ino_number: u32,
-    pub n_seg_capacity: u32,
+    pub n_segment: u32,
 }
 
 /// inode (on disk)
@@ -258,6 +257,10 @@ pub const MAX_NBLOCK_DIRECT: usize = NDIRECT;
 pub const MAX_NBLOCK_INDIRECT: usize = NDIRECT + BLK_NENTRY;
 /// max number of blocks with double indirect blocks
 pub const MAX_NBLOCK_DOUBLE_INDIRECT: usize = NDIRECT + BLK_NENTRY + BLK_NENTRY * BLK_NENTRY;
+
+pub const IMAP_PER_SEGMENT_SIZE: usize = 4;
+pub const SS_PER_SEGMENT_SIZE: usize = 8;
+pub const SEGMENT_META_SIZE: usize = 4;
 
 /// file types
 #[repr(u16)]

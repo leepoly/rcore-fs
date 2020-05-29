@@ -112,12 +112,13 @@ fn main() {
         Cmd::Zip => {
             println!("fuse ready to zip");
             zip_dir(&opt.dir, fs.root_inode()).expect("failed to zip fs");
-            zip_dir2(&opt.dir, fs.root_inode(), 0).expect("failed to zip fs");
+            // zip_dir2(&opt.dir, fs.root_inode(), 0).expect("failed to zip fs");
             println!("fuse zip done");
         }
         Cmd::Unzip => {
             std::fs::create_dir(&opt.dir).expect("failed to create dir");
             unzip_dir(&opt.dir, fs.root_inode()).expect("failed to unzip fs");
+            println!("fuse unzip done");
         }
         Cmd::GitVersion => unreachable!(),
     }

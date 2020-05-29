@@ -22,7 +22,7 @@ class Disk(object):
         print("time_trans %d\ttime_header_move %d" % (self.time_transfer, self.time_header_move))
 
 def new_file(filename):
-    count_lst = [2, 4, 8, 16]
+    count_lst = [2, 4, 8, 16, 32, 128, 256, 1024, 4096]
     size_idx = random.randint(0, len(count_lst) - 1)
     os.system("dd if=/dev/zero of=" + filename + " bs=1k count=" + str(count_lst[size_idx]))
 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("usage: %s rootpath" % (sys.argv[0]))
         sys.exit(0)
-    N = 2
+    N = 75
     dir_set = [sys.argv[1]]
     file_set = []
     os.system("rm -r " + sys.argv[1])
