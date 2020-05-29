@@ -1,4 +1,5 @@
 /target
+rcore-fs-lfs/src/trace/root
 **/*.rs.bk
 Cargo.lock
 rcore-fs-lfs/.vscode/*
