@@ -33,7 +33,7 @@ trait DeviceExt: Device {
     fn read_block(&self, id: BlockId, offset: usize, buf: &mut [u8]) -> vfs::Result<()> {
         // println!("read block offset {} len {}", id * BLKSIZE + offset, buf.len());
         debug_assert!(offset + buf.len() <= BLKSIZE);
-        println!("offset\t{}\tlen\t{}\t0", id * BLKSIZE + offset, buf.len());
+        // println!("offset\t{}\tlen\t{}\t0", id * BLKSIZE + offset, buf.len());
         match self.read_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
             _ => panic!("cannot read block {} offset {} from device", id, offset),
@@ -41,7 +41,7 @@ trait DeviceExt: Device {
     }
     fn write_block(&self, id: BlockId, offset: usize, buf: &[u8]) -> vfs::Result<()> {
         debug_assert!(offset + buf.len() <= BLKSIZE);
-        println!("offset\t{}\tlen\t{}\t1", id * BLKSIZE + offset, buf.len());
+        // println!("offset\t{}\tlen\t{}\t1", id * BLKSIZE + offset, buf.len());
         match self.write_at(id * BLKSIZE + offset, buf) {
             Ok(len) if len == buf.len() => Ok(()),
             _ => panic!("cannot write block {} offset {} to device", id, offset),
@@ -534,6 +534,8 @@ impl Drop for INodeImpl {
 pub struct Segment {
     /// on-disk segment
     size: usize,
+    inodes_num: usize,
+    seg_imap: RwLock<Dirty<IMapTable>>,
     summary_block_map: RwLock<BTreeMap<INodeId, BlockId>>,
     // imap: RwLock<BTreeMap<INodeId, INodeImpl>>,
 }
@@ -565,31 +567,43 @@ impl LogFileSystem {
         let super_block = device.load_struct::<SuperBlock>(BLKN_SUPER)?;
         let check_region = device.load_struct::<CheckRegion>(BLKN_CR)?;
         let mut imaps = BTreeMap::new();
-        let imaps_blkid: u32 = check_region.imaps_blkid;
         let inodes_num: u32 = check_region.inodes_num;
         // device.read_block(BLKN_CR, 0, imaps_blkid.as_buf_mut())?;
         // device.read_block(BLKN_CR, 4, inodes_num.as_buf_mut())?;
         println!("sb size: {} info {:?}", mem::size_of::<SuperBlock>(), super_block.info);
-        println!("imaps blkid {} inonum {}", imaps_blkid, inodes_num);
-        let mut blk_id: u32 = 0;
-        for i in 0..inodes_num as usize {
-            device.read_block(imaps_blkid as usize, i * 4, blk_id.as_buf_mut())?;
-            println!("imaps entry {} -> {}", i, blk_id);
-            if blk_id != 0 {
-                imaps.insert(i, blk_id as usize);
-            }
-        }
+        println!("imaps inonum {}", inodes_num);
         let current_segment_id = super_block.current_seg_id as usize;
         let mut seg_size: u32 = 0;
+        let mut seg_inodes_num: u32 = 0;
         let mut segments = BTreeMap::new();
-        for i in 0..(current_segment_id+1) {
-            device.read_block(BLKN_SEGMENT+i, 0, seg_size.as_buf_mut())?;
+        for i in 1..(current_segment_id+1) {
+            device.read_block(i * SEGMENT_SIZE / BLKSIZE, 0, seg_size.as_buf_mut())?;
+            device.read_block(i * SEGMENT_SIZE / BLKSIZE, 4, seg_inodes_num.as_buf_mut())?;
+
+            let mut seg_imap = BTreeMap::new();
+            for ino_i in 0..seg_inodes_num as usize {
+                let mut blk_id: u32 = 0;
+                let mut inode_id: u32 = 0;
+                // println!("read device {}", (i * SEGMENT_SIZE + SEGMENT_META_SIZE) / BLKSIZE + ino_i * 8);
+                device.read_block((i * SEGMENT_SIZE + SEGMENT_META_SIZE) / BLKSIZE, ino_i * 8, inode_id.as_buf_mut())?;
+                device.read_block((i * SEGMENT_SIZE + SEGMENT_META_SIZE) / BLKSIZE, ino_i * 8 + 4, blk_id.as_buf_mut())?;
+                if blk_id != 0 {
+                    imaps.insert(inode_id as usize, blk_id as usize);
+                    seg_imap.insert(inode_id as usize, blk_id as usize);
+                    println!("load ino {} blkid {}", inode_id, blk_id);
+                }
+            }
+
             let segment_i = Segment {
                 size: seg_size as usize,
+                inodes_num: seg_inodes_num as usize,
+                seg_imap: RwLock::new(Dirty::new(seg_imap)),
                 summary_block_map: RwLock::new(BTreeMap::new()),
             };
+
             segments.insert(i, segment_i);
         }
+        println!("finish loading imaps and segment meta...");
 
         if !super_block.check() {
             return Err(FsError::WrongFs);
@@ -611,10 +625,6 @@ impl LogFileSystem {
     pub fn create(device: Arc<dyn Device>, space: usize) -> vfs::Result<Arc<Self>> {
         let blocks = space / BLKSIZE;
         let current_seg_id_: usize = 1; // segment 0 is reserved for superblock
-        let current_segment = Segment {
-            size: 0,
-            summary_block_map: RwLock::new(BTreeMap::new()),
-        };
         let n_segment = space / SEGMENT_SIZE;
         let unused_blocks_ = ((n_segment - current_seg_id_) + SEGMENT_SIZE) * SEGMENT_SIZE / BLKSIZE;
         assert!(blocks >= 16, "space too small");
@@ -630,7 +640,6 @@ impl LogFileSystem {
 
         let check_region = CheckRegion {
             inodes_num: 0,
-            imaps_blkid: BLKN_IMAP as u32,
         };
 
         let lfs = LogFileSystem {
@@ -680,7 +689,9 @@ impl LogFileSystem {
         assert!(!self.segments.read().contains_key(&seg_id));
         assert!(seg_id < self.super_block.read().n_segment as usize);
         let segment = Segment {
-            size: 0,
+            size: SEGMENT_META_SIZE + IMAP_PER_SEGMENT_SIZE + SS_PER_SEGMENT_SIZE,
+            inodes_num: 0,
+            seg_imap: RwLock::new(Dirty::new_dirty(BTreeMap::new())),
             summary_block_map: RwLock::new(BTreeMap::new()),
         };
         self.segments.write().insert(seg_id, segment);
@@ -694,6 +705,7 @@ impl LogFileSystem {
         let cur_seg_id = sb.current_seg_id as usize;
         let mut current_seg_size = self.segments.read().get(&cur_seg_id).unwrap().size;
         let new_blk_id = (current_seg_size + current_seg_id * SEGMENT_SIZE) / BLKSIZE;
+        // println!("seg size {} {}", current_seg_id, current_seg_size);
         if current_seg_size > SEGMENT_SIZE - BLKSIZE {
             return None;
         } else {
@@ -730,6 +742,11 @@ impl LogFileSystem {
             device_inode_id: device_inode_id,
         });
         cr.inodes_num += 1;
+        let cur_seg_id = self.super_block.read().current_seg_id as usize;
+        let mut segments = self.segments.write();
+        let cur_seg = segments.get_mut(&cur_seg_id).unwrap();
+        cur_seg.inodes_num += 1;
+        cur_seg.seg_imap.write().insert(ino_id, blk_id);
         self.imaps.write().insert(ino_id, blk_id);
         self.inodes.write().insert(ino_id, Arc::downgrade(&inode));
         println!("add inode {} -> {}", ino_id, blk_id);
@@ -819,12 +836,12 @@ impl vfs::FileSystem for LogFileSystem {
         let mut imaps = self.imaps.write();
         let mut cr = self.check_region.write();
         if imaps.dirty() {
-            for (key_ptr, value_ptr) in imaps.iter() {
-                let key = *key_ptr;
-                let value = *value_ptr;
-                // println!("write offset {} value {}", (cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, value);
-                self.device.write_at((cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, (value as u32).as_buf())?;
-            }
+            // for (key_ptr, value_ptr) in imaps.iter() {
+            //     let key = *key_ptr;
+            //     let value = *value_ptr;
+            //     // println!("write offset {} value {}", (cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, value);
+            //     self.device.write_at((cr.imaps_blkid as usize * BLKSIZE) as usize + 4 * key, (value as u32).as_buf())?;
+            // }
             cr.inodes_num = imaps.len() as u32;
             // println!("writeback imaps offset {} len:{}", BLKN_CR * BLKSIZE, cr.inodes_num);
             self.device.write_at(BLKN_CR * BLKSIZE, cr.as_buf())?;
@@ -833,7 +850,23 @@ impl vfs::FileSystem for LogFileSystem {
         }
         for (seg_id, segment) in self.segments.read().iter() {
             let seg_size = segment.size as u32;
-            self.device.write_at((BLKN_SEGMENT+seg_id) * BLKSIZE, seg_size.as_buf())?;
+            let seg_inodes_num = segment.inodes_num as u32;
+            assert!(*seg_id > 0);
+            // sync metadata
+            self.device.write_at(seg_id * SEGMENT_SIZE, seg_size.as_buf())?;
+            self.device.write_at(seg_id * SEGMENT_SIZE + 4, seg_inodes_num.as_buf())?;
+            // sync imaps per seg
+            let mut seg_imaps = segment.seg_imap.write();
+            if seg_imaps.dirty() {
+                let mut idx = 0;
+                for (ino_i, blkid_i) in seg_imaps.iter() {
+                    self.device.write_at(seg_id * SEGMENT_SIZE + SEGMENT_META_SIZE + idx * 8, (*ino_i as u32).as_buf())?;
+                    self.device.write_at(seg_id * SEGMENT_SIZE + SEGMENT_META_SIZE + idx * 8 + 4, (*blkid_i as u32).as_buf())?;
+                    println!("sync ino {} blkid {}", ino_i, blkid_i);
+                    idx += 1;
+                }
+                seg_imaps.sync();
+            }
         }
 
         self.flush_weak_inodes();

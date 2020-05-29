@@ -95,7 +95,7 @@ fn main() {
                 .open(&opt.image)
                 .expect("failed to open image");
             let device = Mutex::new(file);
-            const MAX_SPACE: usize = 0x8000 * 1024; // 8M
+            const MAX_SPACE: usize = 1024 * 1024 * 1024; // 1GB
             match create {
                 true => lfs::LogFileSystem::create(Arc::new(device), MAX_SPACE)
                     .expect("failed to create lfs"),
@@ -104,6 +104,10 @@ fn main() {
         }
         _ => panic!("unsupported file system"),
     };
+    match create {
+        true => println!("finish create"),
+        false => println!("finish open"),
+    }
     match opt.cmd {
         #[cfg(feature = "use_fuse")]
         Cmd::Mount => {

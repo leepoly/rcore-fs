@@ -77,7 +77,7 @@ pub struct DiskEntry {
     pub name: Str256,
 }
 pub struct CheckRegion {
-    pub imaps_blkid: u32,
+    // pub imaps_blkid: u32,
     pub inodes_num: u32,
 }
 
@@ -236,7 +236,6 @@ pub const MAX_FILE_SIZE: usize = 0xffffffff;
 /// block the superblock lives in
 pub const BLKN_SUPER: BlockId = 0;
 pub const BLKN_CR: BlockId = 1;
-pub const BLKN_IMAP: BlockId = 2;
 pub const BLKN_SEGMENT: BlockId = 0x100;
 /// location of the root dir inode
 // pub const BLKN_ROOT: BlockId = 1;
@@ -258,9 +257,9 @@ pub const MAX_NBLOCK_INDIRECT: usize = NDIRECT + BLK_NENTRY;
 /// max number of blocks with double indirect blocks
 pub const MAX_NBLOCK_DOUBLE_INDIRECT: usize = NDIRECT + BLK_NENTRY + BLK_NENTRY * BLK_NENTRY;
 
-pub const IMAP_PER_SEGMENT_SIZE: usize = 4;
-pub const SS_PER_SEGMENT_SIZE: usize = 8;
-pub const SEGMENT_META_SIZE: usize = 4;
+pub const IMAP_PER_SEGMENT_SIZE: usize = BLKSIZE * 2;
+pub const SS_PER_SEGMENT_SIZE: usize = BLKSIZE * 2;
+pub const SEGMENT_META_SIZE: usize = BLKSIZE;
 
 /// file types
 #[repr(u16)]
