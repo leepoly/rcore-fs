@@ -10,6 +10,8 @@ use core::fmt::{Debug, Error, Formatter};
 use core::mem::{size_of, size_of_val};
 use core::slice;
 use static_assertions::const_assert;
+use spin::RwLock;
+use rcore_fs::dirty::Dirty;
 
 /// On-disk superblock
 #[repr(C)]
@@ -196,6 +198,25 @@ pub trait AsBuf {
     }
 }
 
+pub struct SummaryEntry {
+    pub inode_id: u32,
+    pub entry_id: i32,
+}
+
+pub struct SegmentMeta {
+    pub size: usize,
+    pub inodes_num: usize,
+    pub unused: usize,
+}
+
+pub struct Segment {
+    /// on-disk segment
+    pub meta: SegmentMeta,
+    pub seg_imap: RwLock<Dirty<IMapTable>>,
+    pub summary_map: RwLock<Dirty<BTreeMap<BlockId, SummaryEntry>>>,
+    // imap: RwLock<BTreeMap<INodeId, INodeImpl>>,
+}
+
 impl AsBuf for SuperBlock {}
 
 impl AsBuf for DiskINode {}
@@ -205,6 +226,10 @@ impl AsBuf for DiskEntry {}
 impl AsBuf for u32 {}
 
 impl AsBuf for CheckRegion {}
+
+impl AsBuf for SummaryEntry {}
+
+impl AsBuf for SegmentMeta {}
 
 /*
  * Simple FS (SFS) definitions visible to ucore. This covers the on-disk format
@@ -260,6 +285,7 @@ pub const MAX_NBLOCK_DOUBLE_INDIRECT: usize = NDIRECT + BLK_NENTRY + BLK_NENTRY 
 pub const IMAP_PER_SEGMENT_SIZE: usize = BLKSIZE * 2;
 pub const SS_PER_SEGMENT_SIZE: usize = BLKSIZE * 2;
 pub const SEGMENT_META_SIZE: usize = BLKSIZE;
+pub const BLK_DATA_BEGIN: usize = (IMAP_PER_SEGMENT_SIZE + SS_PER_SEGMENT_SIZE + SEGMENT_META_SIZE) / BLKSIZE;
 
 /// file types
 #[repr(u16)]
