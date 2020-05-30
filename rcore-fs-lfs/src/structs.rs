@@ -199,7 +199,7 @@ pub trait AsBuf {
 }
 
 pub struct SummaryEntry {
-    pub inode_id: u32,
+    pub inode_id: i32,
     pub entry_id: i32,
 }
 
