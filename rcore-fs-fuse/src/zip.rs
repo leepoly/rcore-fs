@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::fs;
+use std::io::prelude::*;
+use std::io::SeekFrom;
 use std::io::{Read, Write};
 use std::mem::MaybeUninit;
 #[cfg(unix)]
@@ -83,6 +85,36 @@ pub fn zip_dir2(path: &Path, inode: Arc<dyn INode>, depth: usize) -> Result<(), 
     Ok(())
 }
 
+pub fn pressure_test(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>> {
+    debug!("fuse: test a new root fs");
+    inode.ls();
+    println!("size {}", inode.metadata()?.size);
+    let mut file = fs::File::open("build/test-file-2M")?;
+    let mut idx = 0;
+    while idx < 4 {
+        file.seek(SeekFrom::Start(0));
+        let idx_str: &str = &idx.to_string();
+        let new_filename = "test".to_owned() + idx_str;
+        let new_inode = inode.create(&new_filename, FileType::File, DEFAULT_MODE)?;
+        new_inode.resize(file.metadata()?.len() as usize)?;
+        let mut buf: [u8; BUF_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut offset = 0usize;
+        let mut len = BUF_SIZE;
+        while len == BUF_SIZE {
+            len = file.read(&mut buf)?;
+            new_inode.write_at(offset, &buf[..len])?;
+            offset += len;
+        }
+        let files = inode.ls();
+        inode.unlink(&new_filename);
+        println!("unlink done!");
+        let files = inode.ls();
+        println!("ls done!");
+        idx += 1;
+    }
+    Ok(())
+}
+
 /// 为 [`INode`] 类型添加的扩展功能
 pub trait INodeExt {
     /// 打印当前目录的文件
@@ -94,11 +126,11 @@ impl INodeExt for dyn INode {
     fn ls(&self) {
         let mut id = 0;
         while let Ok(name) = self.get_entry(id) {
-            debug!("{}", name);
+            println!("{}", name);
             id += 1;
         }
+        println!("");
     }
-
 }
 
 pub fn unzip_dir(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn Error>> {

@@ -9,7 +9,7 @@ use rcore_fs::vfs::FileSystem;
 #[cfg(feature = "use_fuse")]
 use rcore_fs_fuse::fuse::VfsFuse;
 use log::debug;
-use rcore_fs_fuse::zip::{unzip_dir, zip_dir, zip_dir2};
+use rcore_fs_fuse::zip::{unzip_dir, zip_dir, zip_dir2, pressure_test};
 use rcore_fs_sfs as sfs;
 use rcore_fs_lfs as lfs;
 
@@ -40,6 +40,10 @@ enum Cmd {
     #[structopt(name = "zip")]
     Zip,
 
+    /// pressure test
+    #[structopt(name = "test")]
+    Test,
+
     /// Unzip data from given <image> to <dir>
     #[structopt(name = "unzip")]
     Unzip,
@@ -64,6 +68,7 @@ fn main() {
         Cmd::Mount => !opt.image.is_dir() && !opt.image.is_file(),
         Cmd::Zip => true,
         Cmd::Unzip => false,
+        Cmd::Test => true,
         Cmd::GitVersion => {
             println!("{}", git_version!());
             return;
@@ -96,7 +101,8 @@ fn main() {
                 .open(&opt.image)
                 .expect("failed to open image");
             let device = Mutex::new(file);
-            const MAX_SPACE: usize = 1024 * 1024 * 1024; // 1GB
+            // const MAX_SPACE: usize = 1024 * 1024 * 1024; // 1GB
+            const MAX_SPACE: usize = 12 * 1024 * 1024; // 12MB
             match create {
                 true => lfs::LogFileSystem::create(Arc::new(device), MAX_SPACE)
                     .expect("failed to create lfs"),
@@ -119,6 +125,10 @@ fn main() {
             zip_dir(&opt.dir, fs.root_inode()).expect("failed to zip fs");
             // zip_dir2(&opt.dir, fs.root_inode(), 0).expect("failed to zip fs");
             debug!("fuse zip done");
+        }
+        Cmd::Test => {
+            pressure_test(&opt.dir, fs.root_inode()).expect("fs test failed");
+            println!("test FS done");
         }
         Cmd::Unzip => {
             std::fs::create_dir(&opt.dir).expect("failed to create dir");

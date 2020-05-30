@@ -187,8 +187,10 @@ impl INodeImpl {
         let size = self.disk_inode.read().size as usize;
         let dirent_count = size / DIRENT_SIZE;
         debug_assert!(id < dirent_count);
+        println!("remove_dentry id {} count {}", id, dirent_count);
         let last_dirent = self.read_direntry(dirent_count - 1)?;
         self.write_direntry(id, &last_dirent)?;
+        self.disk_inode.write().size -= DIRENT_SIZE as u32;
         Ok(())
     }
     /// Resize content size, no matter what type it is.
@@ -333,20 +335,22 @@ impl INodeImpl {
         disk_inode.nlinks -= 1;
     }
     fn _free_all_block(&self) -> vfs::Result<()> {
-        let mut disk_inode = self.disk_inode.write();
-        let old_blocks = disk_inode.blocks;
+        let old_blocks = self.disk_inode.read().blocks;
         for i in 0..old_blocks {
             let disk_block_id = self.get_disk_block_id(i as usize)?;
             self.fs.free_block(disk_block_id);
         }
+        let mut disk_inode = self.disk_inode.write();
         // free indirect block if needed
-        if disk_inode.blocks >= MAX_NBLOCK_DIRECT as u32
+        if old_blocks >= MAX_NBLOCK_DIRECT as u32
         {
             self.fs.free_block(disk_inode.indirect as usize);
             disk_inode.indirect = 0;
         }
         disk_inode.blocks = 0;
         disk_inode.size = 0 as u32;
+        drop(disk_inode);
+        self.sync_data()?;
         Ok(())
     }
 }
@@ -555,12 +559,12 @@ impl vfs::INode for INodeImpl {
             }
         }
         inode.nlinks_dec();
+        println!("inode links {}", inode.disk_inode.read().nlinks);
         if type_ == FileType::Dir {
             inode.nlinks_dec(); //for .
             self.nlinks_dec(); //for ..
         }
         self.remove_direntry(entry_id)?;
-
         Ok(())
     }
     fn move_(&self, old_name: &str, target: &Arc<dyn INode>, new_name: &str) -> vfs::Result<()> {
@@ -603,12 +607,16 @@ impl Drop for INodeImpl {
     /// Auto sync when drop
     fn drop(&mut self) {
         if self.disk_inode.read().nlinks <= 0 {
+            let mut disk_inode = self.disk_inode.write();
             // clean data block and inode itself
-            self._free_all_block().unwrap();
-            self.disk_inode.write().sync();
+            disk_inode.sync();
             let mut segments = self.fs.segments.write();
             let cur_seg = segments.get_mut(&(self.fs.super_block.read().current_seg_id as usize)).unwrap();
             cur_seg.seg_imap.write().insert(self.id, 0); // indicate this inode is being dumped
+            drop(cur_seg);
+            drop(segments);
+            drop(disk_inode);
+            self._free_all_block().unwrap();
             self.fs.free_block(self.blk_id);
         } else {
             self.sync_all()
@@ -848,7 +856,7 @@ impl LogFileSystem {
         cur_seg.seg_imap.write().insert(ino_id, blk_id);
         self.imaps.write().insert(ino_id, blk_id);
         self.inodes.write().insert(ino_id, Arc::downgrade(&inode));
-        debug!("add inode {} -> {}", ino_id, blk_id);
+        println!("add inode {} -> {}  segid {}", ino_id, blk_id, cur_seg_id);
         inode
     }
 
