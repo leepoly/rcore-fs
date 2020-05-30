@@ -8,6 +8,7 @@ use rcore_fs::dev::std_impl::StdTimeProvider;
 use rcore_fs::vfs::FileSystem;
 #[cfg(feature = "use_fuse")]
 use rcore_fs_fuse::fuse::VfsFuse;
+use log::debug;
 use rcore_fs_fuse::zip::{unzip_dir, zip_dir, zip_dir2};
 use rcore_fs_sfs as sfs;
 use rcore_fs_lfs as lfs;
@@ -53,7 +54,7 @@ enum Cmd {
 }
 
 fn main() {
-    println!("modified in aoslab, supporting lfs");
+    debug!("modified in aoslab, supporting lfs");
     env_logger::init().unwrap();
     let opt = Opt::from_args();
 
@@ -105,8 +106,8 @@ fn main() {
         _ => panic!("unsupported file system"),
     };
     match create {
-        true => println!("finish create"),
-        false => println!("finish open"),
+        true => debug!("finish create"),
+        false => debug!("finish open"),
     }
     match opt.cmd {
         #[cfg(feature = "use_fuse")]
@@ -114,17 +115,17 @@ fn main() {
             fuse::mount(VfsFuse::new(fs), &opt.dir, &[]).expect("failed to mount fs");
         }
         Cmd::Zip => {
-            println!("fuse ready to zip");
+            debug!("fuse ready to zip");
             zip_dir(&opt.dir, fs.root_inode()).expect("failed to zip fs");
             // zip_dir2(&opt.dir, fs.root_inode(), 0).expect("failed to zip fs");
-            println!("fuse zip done");
+            debug!("fuse zip done");
         }
         Cmd::Unzip => {
             std::fs::create_dir(&opt.dir).expect("failed to create dir");
             unzip_dir(&opt.dir, fs.root_inode()).expect("failed to unzip fs");
-            println!("fuse unzip done");
+            debug!("fuse unzip done");
         }
         Cmd::GitVersion => unreachable!(),
     }
-    println!("fuse all done");
+    debug!("fuse all done");
 }
