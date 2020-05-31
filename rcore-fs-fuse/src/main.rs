@@ -1,4 +1,6 @@
 use std::fs::OpenOptions;
+use std::io::prelude::*;
+use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -101,8 +103,8 @@ fn main() {
                 .open(&opt.image)
                 .expect("failed to open image");
             let device = Mutex::new(file);
-            // const MAX_SPACE: usize = 1024 * 1024 * 1024; // 1GB
-            const MAX_SPACE: usize = 12 * 1024 * 1024; // 12MB
+            const MAX_SPACE: usize = 1024 * 1024 * 1024; // 1GB
+            // const MAX_SPACE: usize = 12 * 1024 * 1024; // 12MB
             match create {
                 true => lfs::LogFileSystem::create(Arc::new(device), MAX_SPACE)
                     .expect("failed to create lfs"),

@@ -204,14 +204,14 @@ pub struct SummaryEntry {
 }
 
 pub struct SegmentMeta {
-    pub size: usize,
-    pub inodes_num: usize,
-    pub unused: usize,
+    pub size: u32,
+    pub inodes_num: u32,
+    pub unused: u32,
 }
 
 pub struct Segment {
     /// on-disk segment
-    pub meta: SegmentMeta,
+    pub meta: Dirty<SegmentMeta>,
     pub seg_imap: RwLock<Dirty<IMapTable>>,
     pub summary_map: RwLock<Dirty<BTreeMap<BlockId, SummaryEntry>>>,
     // imap: RwLock<BTreeMap<INodeId, INodeImpl>>,
@@ -267,8 +267,6 @@ pub const BLKN_SEGMENT: BlockId = 0x100;
 pub const INO_ROOT: INodeId = 0;
 /// number of bits in a block
 pub const BLKBITS: usize = BLKSIZE * 8;
-/// size of one segment
-pub const SEGMENT_SIZE: usize = 1024 * BLKSIZE;
 /// size of one entry
 pub const ENTRY_SIZE: usize = 4;
 /// number of entries in a block
@@ -282,10 +280,15 @@ pub const MAX_NBLOCK_INDIRECT: usize = NDIRECT + BLK_NENTRY;
 /// max number of blocks with double indirect blocks
 pub const MAX_NBLOCK_DOUBLE_INDIRECT: usize = NDIRECT + BLK_NENTRY + BLK_NENTRY * BLK_NENTRY;
 
+/// size of one segment
+pub const SEGMENT_BLKS: usize = 1024;
+pub const SEGMENT_SIZE: usize = SEGMENT_BLKS * BLKSIZE;
+
 pub const IMAP_PER_SEGMENT_SIZE: usize = BLKSIZE * 2;
 pub const SS_PER_SEGMENT_SIZE: usize = BLKSIZE * 2;
 pub const SEGMENT_META_SIZE: usize = BLKSIZE;
 pub const BLK_DATA_BEGIN: usize = (IMAP_PER_SEGMENT_SIZE + SS_PER_SEGMENT_SIZE + SEGMENT_META_SIZE) / BLKSIZE;
+pub const SEGN_ROOT: usize = 1;
 
 /// file types
 #[repr(u16)]

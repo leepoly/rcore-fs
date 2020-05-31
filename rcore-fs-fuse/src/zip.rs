@@ -91,7 +91,7 @@ pub fn pressure_test(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn E
     println!("size {}", inode.metadata()?.size);
     let mut file = fs::File::open("build/test-file-2M")?;
     let mut idx = 0;
-    while idx < 4 {
+    while idx < 1 {
         file.seek(SeekFrom::Start(0));
         let idx_str: &str = &idx.to_string();
         let new_filename = "test".to_owned() + idx_str;
