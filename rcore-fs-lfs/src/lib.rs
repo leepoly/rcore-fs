@@ -196,7 +196,7 @@ impl INodeImpl {
         let size = self.disk_inode.read().size as usize;
         let dirent_count = size / DIRENT_SIZE;
         debug_assert!(id < dirent_count);
-        println!("remove_dentry id {} count {}", id, dirent_count);
+        debug!("remove_dentry id {} count {}", id, dirent_count);
         let last_dirent = self.read_direntry(dirent_count - 1)?;
         self.write_direntry(id, &last_dirent)?;
         self.disk_inode.write().size -= DIRENT_SIZE as u32;
@@ -227,7 +227,7 @@ impl INodeImpl {
                 }
                 if old_blocks < MAX_NBLOCK_DIRECT as u32 && blocks >= MAX_NBLOCK_DIRECT as u32 {
                     disk_inode.indirect = self.fs.alloc_block().expect("no space") as u32;
-                    self.fs._record_block_summary(self.id, disk_inode.indirect as usize, -1); // -1 indicates it is a special indirect ptr block
+                    self.fs._record_block_summary(self.id, disk_inode.indirect as usize, ENTRY_SPECIALBLOCK);
                 }
                 drop(disk_inode);
                 // allocate extra blocks
@@ -447,7 +447,7 @@ impl vfs::INode for INodeImpl {
             } else {
                 self.blk_id
             };
-            self.fs._record_block_summary(self.id, new_blk_id, -1);
+            self.fs._record_block_summary(self.id, new_blk_id, ENTRY_SPECIALBLOCK);
             // update imaps
             let mut imaps = self.fs.imaps.write();
             if let Some(x) = imaps.get_mut(&self.id) {
@@ -568,7 +568,7 @@ impl vfs::INode for INodeImpl {
             }
         }
         inode.nlinks_dec();
-        println!("inode links {}", inode.disk_inode.read().nlinks);
+        debug!("inode links {}", inode.disk_inode.read().nlinks);
         if type_ == FileType::Dir {
             inode.nlinks_dec(); //for .
             self.nlinks_dec(); //for ..
@@ -620,13 +620,18 @@ impl Drop for INodeImpl {
             // clean data block and inode itself
             disk_inode.sync();
             let mut segments = self.fs.segments.write();
-            let cur_seg = segments.get_mut(&(self.fs.super_block.read().current_seg_id as usize)).unwrap();
-            cur_seg.seg_imap.write().insert(self.id, 0); // indicate this inode is being dumped
-            drop(cur_seg);
+            let seg_id = self.blk_id / SEGMENT_BLKS;
+            let seg = segments.get_mut(&(seg_id)).unwrap();
+            seg.seg_imap.write().insert(self.id, INVALID_BLKID);
+            drop(seg);
             drop(segments);
             drop(disk_inode);
             self._free_all_block().unwrap();
             self.fs.free_block(self.blk_id);
+            let mut segments = self.fs.segments.write();
+            let seg = segments.get_mut(&(seg_id)).unwrap();
+            let seg_id = self.blk_id / SEGMENT_BLKS;
+            debug!("freed seg {} blk {} entry {}", seg_id, self.blk_id, seg.summary_map.read().get(&self.blk_id).unwrap().entry_id);
         } else {
             self.sync_all()
                 .expect("Failed to sync when dropping the LogStructureFileSystem Inode");
@@ -761,7 +766,7 @@ impl LogFileSystem {
         let root_blkid = lfs.alloc_block().ok_or(FsError::NoDeviceSpace)?;
         // debug!("init current_segment_size:{}", lfs.super_block.read().current_seg_size);
         let root_inode = lfs._new_inode(root_blkid, Dirty::new_dirty(DiskINode::new_dir()));
-        lfs._record_block_summary(root_inode.id, root_blkid, -1);
+        lfs._record_block_summary(root_inode.id, root_blkid, ENTRY_SPECIALBLOCK);
         root_inode.init_direntry(root_blkid)?;
         root_inode.nlinks_inc(); //for .
         root_inode.nlinks_inc(); //for ..(root's parent is itself)
@@ -802,23 +807,29 @@ impl LogFileSystem {
         }
     }
 
-    fn alloc_segment(&self) {
-        let mut new_seg_id = 0;
-        if self.super_block.read().current_seg_id == self.super_block.read().n_segment {
-            self._detect_garbage_segment();
-        }
+    fn find_available_segment(&self) -> usize {
         for (seg_id, segment) in self.segments.write().iter_mut() {
             if segment.meta.unused == 1 {
-                new_seg_id = *seg_id;
-                segment.meta.unused = 0;
-                break;
+                return *seg_id;
             }
+        }
+        return 0;
+    }
+
+    fn alloc_segment(&self) {
+        let mut new_seg_id = self.find_available_segment();
+        if new_seg_id == 0 {
+            self._detect_garbage_segment();
+            new_seg_id = self.find_available_segment();
         }
         debug!("new segment {}", new_seg_id);
         if new_seg_id == 0 {
             // no available segment even after collecting garbage segment
             error!("Not enough space");
         } else {
+            let mut segments = self.segments.write();
+            let seg = segments.get_mut(&new_seg_id).unwrap();
+            seg.meta.unused = 0;
             self.super_block.write().current_seg_id = new_seg_id as u32;
         }
     }
@@ -840,8 +851,6 @@ impl LogFileSystem {
             if current_seg_size == SEGMENT_SIZE {
                 drop(sb);
                 self.alloc_segment();
-                let cur_seg_id = self.super_block.read().current_seg_id as usize;
-                debug!("allocate blkid: {} at segment: {} size: {}", new_blk_id, cur_seg_id, self.segments.read().get(&cur_seg_id).unwrap().meta.size);
             }
         }
         Some(new_blk_id)
@@ -850,13 +859,14 @@ impl LogFileSystem {
     /// Free a block
     fn free_block(&self, block_id: usize) {
         let mut segments = self.segments.write();
-        let cur_seg = segments.get_mut(&(self.super_block.read().current_seg_id as usize)).unwrap();
-        cur_seg.summary_map.write().insert(block_id, SummaryEntry {
-            entry_id: -2,
-            inode_id: -1, // indicate an invalid (unused) block
+        let seg_id = block_id / SEGMENT_BLKS;
+        let seg = segments.get_mut(&seg_id).unwrap();
+        seg.summary_map.write().insert(block_id, SummaryEntry {
+            entry_id: ENTRY_GARBAGE as i32,
+            inode_id: INVALID_INO as i32,
         });
         self.super_block.write().unused_blocks += 1;
-        debug!("free block {:#x}", block_id);
+        debug!("free block {} seg {}", block_id, seg_id);
     }
 
     pub fn new_device_inode(&self, device_inode_id: usize, device_inode: Arc<DeviceINode>) {
@@ -886,14 +896,15 @@ impl LogFileSystem {
         cur_seg.seg_imap.write().insert(ino_id, blk_id);
         self.imaps.write().insert(ino_id, blk_id);
         self.inodes.write().insert(ino_id, Arc::downgrade(&inode));
-        println!("add inode {} -> {}  segid {}", ino_id, blk_id, cur_seg_id);
+        debug!("add inode {} -> {}  segid {}", ino_id, blk_id, cur_seg_id);
         inode
     }
 
     fn _record_block_summary(&self, ino_id: INodeId, blk_id: BlockId, entry_id: isize) {
         let mut segments = self.segments.write();
-        let cur_seg = segments.get_mut(&((self.super_block.read().current_seg_id as usize))).unwrap();
-        cur_seg.summary_map.write().insert(blk_id, SummaryEntry{
+        let seg_id = blk_id / SEGMENT_BLKS;
+        let seg = segments.get_mut(&(seg_id)).unwrap();
+        seg.summary_map.write().insert(blk_id, SummaryEntry{
             inode_id: ino_id as i32,
             entry_id: entry_id as i32,
         });
@@ -940,7 +951,7 @@ impl LogFileSystem {
         let id = self.alloc_block().ok_or(FsError::NoDeviceSpace)?;
         let disk_inode = Dirty::new_dirty(DiskINode::new_file());
         let new_inode = self._new_inode(id, disk_inode);
-        self._record_block_summary(new_inode.id, new_inode.blk_id, -1); // -1 indicates it is inode itself
+        self._record_block_summary(new_inode.id, new_inode.blk_id, ENTRY_SPECIALBLOCK);
         Ok(new_inode)
     }
     /// Create a new INode symlink
@@ -953,7 +964,7 @@ impl LogFileSystem {
         let disk_inode = Dirty::new_dirty(DiskINode::new_dir());
         let inode = self._new_inode(id, disk_inode);
         inode.init_direntry(parent)?;
-        self._record_block_summary(inode.id, inode.blk_id, -1); // -1 indicates it is inode itself
+        self._record_block_summary(inode.id, inode.blk_id, ENTRY_SPECIALBLOCK);
         Ok(inode)
     }
     /// Create a new INode chardevice
@@ -973,7 +984,7 @@ impl LogFileSystem {
     }
 
     fn _detect_garbage_segment(&self) {
-        for seg_i in 0..self.super_block.read().n_segment as usize {
+        for seg_i in 1..self.super_block.read().n_segment as usize {
             let mut segments = self.segments.write();
             let seg = segments.get_mut(&seg_i).unwrap();
             let mut cleanable = true;
@@ -982,10 +993,10 @@ impl LogFileSystem {
                 for (blkid, entry_i) in seg.summary_map.write().iter() {
                     let ino_id = entry_i.inode_id as usize;
                     let alive;
-                    if entry_i.entry_id == -2 {
+                    if entry_i.entry_id == ENTRY_GARBAGE as i32 {
                         alive = false;
                     }
-                    else if entry_i.entry_id == -1 {
+                    else if entry_i.entry_id == ENTRY_SPECIALBLOCK as i32 {
                         // if it is an inode/indirect block, it is alive only when it exists in imaps
                         if self.imaps.read().contains_key(&ino_id) && (*self.imaps.read().get(&ino_id).unwrap())>0 {
                             alive = true;
@@ -1006,6 +1017,9 @@ impl LogFileSystem {
             }
             if cleanable {
                 seg.meta.unused = 1;
+                seg.meta.inodes_num = 0;
+                seg.meta.size = (SEGMENT_META_SIZE + SS_PER_SEGMENT_SIZE + IMAP_PER_SEGMENT_SIZE) as u32;
+                debug!("seg {} unused", seg_i);
             }
         }
     }

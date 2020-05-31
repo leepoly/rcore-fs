@@ -89,9 +89,10 @@ pub fn pressure_test(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn E
     debug!("fuse: test a new root fs");
     inode.ls();
     println!("size {}", inode.metadata()?.size);
-    let mut file = fs::File::open("build/test-file-2M")?;
+    let mut file = fs::File::open("build/test-file-3M")?;
     let mut idx = 0;
-    while idx < 1 {
+    let possible_len_size = [1024, 2048, 3072, 4096];
+    while idx < 100 {
         file.seek(SeekFrom::Start(0));
         let idx_str: &str = &idx.to_string();
         let new_filename = "test".to_owned() + idx_str;
@@ -107,9 +108,9 @@ pub fn pressure_test(path: &Path, inode: Arc<dyn INode>) -> Result<(), Box<dyn E
         }
         let files = inode.ls();
         inode.unlink(&new_filename);
-        println!("unlink done!");
-        let files = inode.ls();
-        println!("ls done!");
+        // println!("unlink done!");
+        // let files = inode.ls();
+        // println!("ls done!");
         idx += 1;
     }
     Ok(())

@@ -103,8 +103,9 @@ fn main() {
                 .open(&opt.image)
                 .expect("failed to open image");
             let device = Mutex::new(file);
-            const MAX_SPACE: usize = 1024 * 1024 * 1024; // 1GB
-            // const MAX_SPACE: usize = 12 * 1024 * 1024; // 12MB
+            const MAX_SPACE: usize = 128 * 1024 * 1024; // 128MB
+            // const MAX_SPACE: usize = 1024 * 1024 * 1024; // 1GB
+            // const MAX_SPACE: usize = 16 * 1024 * 1024; // 16MB
             match create {
                 true => lfs::LogFileSystem::create(Arc::new(device), MAX_SPACE)
                     .expect("failed to create lfs"),

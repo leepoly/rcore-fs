@@ -33,7 +33,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("usage: %s rootpath" % (sys.argv[0]))
         sys.exit(0)
-    N = 5
+    N = 100
     dir_set = [sys.argv[1]]
     file_set = []
     os.system("rm -r " + sys.argv[1])

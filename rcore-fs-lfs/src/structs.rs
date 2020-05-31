@@ -241,7 +241,7 @@ pub type INodeId = BlockId;
 
 pub const NODEVICE: usize = 100;
 
-/// magic number for sfs
+/// magic number for lfs
 pub const MAGIC: u32 = 0x2f8dbe2c;
 /// size of block
 pub const BLKSIZE: usize = 1usize << BLKSIZE_LOG2; // 4KB
@@ -289,6 +289,10 @@ pub const SS_PER_SEGMENT_SIZE: usize = BLKSIZE * 2;
 pub const SEGMENT_META_SIZE: usize = BLKSIZE;
 pub const BLK_DATA_BEGIN: usize = (IMAP_PER_SEGMENT_SIZE + SS_PER_SEGMENT_SIZE + SEGMENT_META_SIZE) / BLKSIZE;
 pub const SEGN_ROOT: usize = 1;
+pub const ENTRY_SPECIALBLOCK: isize = -1; // for inode, "indirect block"
+pub const ENTRY_GARBAGE: isize = -2; // for deleted block
+pub const INVALID_INO: isize = -1;
+pub const INVALID_BLKID: usize = 0;
 
 /// file types
 #[repr(u16)]
